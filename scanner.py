@@ -7,8 +7,9 @@
 # 
 
 import os
-from re import match
 import time
+from re import match
+
 from config import cfg, log, win
 from judger import Judger
 
@@ -16,7 +17,7 @@ from judger import Judger
 class Scanner(object):
     __SleepSeconds = cfg.getint('ScanFile', 'Sleep')
     __MaxFiles = cfg.getint('ScanFile', 'MaxFiles')
-    __MaxSeconds = cfg.getint('ScanFile','MaxSeconds')
+    __MaxSeconds = cfg.getint('ScanFile', 'MaxSeconds')
     if win:  # 根据不同操作系统设置起始扫描目录
         __InitialPaths = [chr(i) + ':\\' for i in range(0x61, 0x7a) if os.path.isdir(chr(i) + ':\\')]
         __ExcludedPaths = cfg.get('ScanFile', 'ExcludedWin').lower().split()
@@ -41,7 +42,7 @@ class Scanner(object):
                         continue
                     for dir_name in dir_names:  # 对无权进入的子目录，从扫描列表中清除并记录告警日志
                         dir_fullname = os.path.join(dir_path, dir_name)
-                        if not os.access(dir_fullname, os.X_OK|os.R_OK):
+                        if not os.access(dir_fullname, os.X_OK | os.R_OK):
                             dir_names.remove(dir_name)
                             log.warning('[Permission denied:] ' + dir_fullname)
                     if len(file_names) > self.__MaxFiles:  # 目录下文件特别多,很可能是数据文件目录
@@ -69,13 +70,12 @@ class Scanner(object):
                                 continue
                             print(file_fullname, file=fp)
                             sampled_files += 1
-                        except Exception as err:   # 出现过目录/文件名为乱字符导致写fp文件出现字符集异常情况
-                           log.error(str(err))
+                        except Exception as err:  # 出现过目录/文件名为乱字符导致写fp文件出现字符集异常情况
+                            log.error(str(err))
 
         log.info('Finish scan:[%d], error[%d], inactive[%d], small[%d], wrong-type[%d], non-text[%d], candidate[%d]' % (
-                scaned_files, err_counters[0], err_counters[1], err_counters[2], err_counters[3],
-                err_counters[4] + err_counters[5], sampled_files))
-
+            scaned_files, err_counters[0], err_counters[1], err_counters[2], err_counters[3],
+            err_counters[4] + err_counters[5], sampled_files))
 
 
 if __name__ == '__main__':
