@@ -6,11 +6,10 @@
 # @Desc  : 读取配置文件、初始化日志设置，生成cfg、log对象
 #
 
-from os import path, mkdir
 import logging
-import configparser
-from platform import system
 import sys
+from configparser import ConfigParser
+from os import path, mkdir
 
 
 def logSettings( logger ):
@@ -20,8 +19,8 @@ def logSettings( logger ):
 
     log_level = cfg.getint('Log', 'Level')
     logger.setLevel(log_level)
-    formatter = logging.Formatter('%(asctime)s\t%(levelname)s\t%(message)s')
-    fh = logging.FileHandler(log_path + path.splitext(path.split(sys.argv[0])[1])[0] + '.log')
+    formatter = logging.Formatter('%(asctime)s\t%(levelname)s\t%(filename)s %(lineno)d\t%(message)s')
+    fh = logging.FileHandler(path.join(log_path, path.splitext(path.split(sys.argv[0])[1])[0] + '.log'))
     fh.setFormatter(formatter)
     logger.addHandler(fh)
 
@@ -30,16 +29,11 @@ def logSettings( logger ):
         ch.setFormatter(formatter)
         logger.addHandler(ch)
 
-    logger.debug("stared!")
+    logger.debug('%s stared!', sys.argv[0])
 
 
-if system() == 'Windows':
-    win = True
-else:
-    win = False
-
-cfg = configparser.ConfigParser()
+cfg = ConfigParser()
 cfg.read('./config.ini', encoding='UTF-8')
 
-log = logging.getLogger()
+log = logging.getLogger(sys.argv[0])
 logSettings(log)
