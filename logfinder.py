@@ -43,16 +43,16 @@ class Logfinder(object):
 
     # 初始化配置参数
     def __loadConfig(self):
-        self.__SleepSeconds = cfg.getint('ScanFile', 'Sleep')  # Sleeping seconds per 1000 files scanned
+        self.__SleepSeconds = cfg.getint('ScanFile', 'SleepSeconds')  # Sleeping seconds per 1000 files scanned
         self.__MaxFiles = cfg.getint('ScanFile', 'MaxFiles')  # skip folder if files exceed
         self.__MaxSeconds = cfg.getint('ScanFile', 'MaxSeconds')  # skip folder if too long to scan
-        self.__SmallFileMaxSize = cfg.getint('ScanFile', 'SmallFile') * 1024  # skip file less than
-        self.__LastUpdateSeconds = cfg.getint('ScanFile', 'LastUpdate') * 3600  # skip file elder than
+        self.__SmallFileMaxSize = cfg.getint('ScanFile', 'SmallFileSizeKB') * 1024  # skip file less than
+        self.__LastUpdateSeconds = cfg.getint('ScanFile', 'LastUpdateHours') * 3600  # skip file elder than
         self.__CodecCheckSize = cfg.getint('ScanFile', 'CodecCheck')  # chardet sample size
         self.__ExcludedExtensions = cfg.get('ScanFile', 'ExcludedExt').lower().split()
         self.__StartLine = cfg.getint('Sample', 'StartingLine')
         self.__EndLine = self.__StartLine + cfg.getint('Sample', 'SampleLines')
-        self.__MaxSize = cfg.getint('Sample', 'MaxSize') * 1024 * 1024
+        self.__MaxSize = cfg.getint('Sample', 'MaxSizeMB') * 1024 * 1024
         self.__LogPath = cfg.get('Log', 'Folder')
         self.__OutputPath = cfg.get('Sample', 'DataPath')
         self.__OutputFormat = cfg.get('Sample', 'Format')
@@ -140,7 +140,8 @@ class Logfinder(object):
                     log.warning('[Too slow to scan, Ignoring:]( ' + dir_path)
                     break
 
-                if self.__isLogFile(file_fullname, fc):  # 该文件候选日志，本目录需要采集
+                # 该文件候选日志，本目录需要采集
+                if self.__isLogFile(file_fullname, fc, newer_than=self.__LastUpdateSeconds):
                     sample_list.append(dir_path)
                     fc['sampled'] += 1
                     break
@@ -148,10 +149,10 @@ class Logfinder(object):
                 log.error(str(err))
 
     # 滤除太小,太旧,可执行,非文本,及无效扩展名的文件
-    def __isLogFile(self, file_fullname, fc):
+    def __isLogFile(self, file_fullname, fc, newer_than=None):
         try:
             size, last_update = os.path.getsize(file_fullname), os.path.getmtime(file_fullname)
-            if time.time() - last_update > self.__LastUpdateSeconds:  # long time no update
+            if newer_than and time.time() - last_update > newer_than:  # long time no update
                 fc['old'] += 1
             elif self.__win and last_update <= os.path.getctime(file_fullname):  # no update after create
                 fc['old'] += 1
@@ -178,7 +179,6 @@ class Logfinder(object):
 
     # 采集样本文件到__OutputPath
     def sampleFiles(self, sample_dir):
-        self.__LastUpdateSeconds = cfg.getint('Sample', 'LastUpdate') * 3600  # skip file elder than
         fc = {'Scanned': 0, 'sampled': 0, 'err': 0, 'old': 0, 'small': 0, 'invalid ext': 0, 'binary': 0}
         sampled_list = []
         log.info('Starting Samples %d files' % len(sample_dir))
@@ -196,7 +196,7 @@ class Logfinder(object):
             for file_name in os.listdir(path_from):
                 # 判断是否是潜在日志文件
                 file_from = os.path.join(path_from, file_name)
-                if not self.__isLogFile(file_from, fc):  # 该文件不是候选日志，无需采
+                if not self.__isLogFile(file_from, fc, newer_than=31536000):  # 该文件不是候选日志，无需采
                     continue
                 # 生成目标文件名
                 if self.__OutputFormat == 'Separate':
