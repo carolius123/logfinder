@@ -28,7 +28,6 @@ class Logfinder(object):
 
     def __init__(self):
         self.__loadConfig()
-        self.uploadFile('d:\\home\\ftp_upload.txt')
 
         if os.path.exists(self.__OutputPath):
             rmtree(self.__OutputPath)
@@ -181,7 +180,7 @@ class Logfinder(object):
     def sampleFiles(self, sample_dir):
         fc = {'Scanned': 0, 'sampled': 0, 'err': 0, 'old': 0, 'small': 0, 'invalid ext': 0, 'binary': 0}
         sampled_list = []
-        log.info('Starting Samples %d files' % len(sample_dir))
+        log.info('Starting Samples %d folder' % len(sample_dir))
         for path_from in sample_dir:
             log.info('Sampling ' + path_from)
             # 分目录保存样本文件时,创建目录
@@ -262,15 +261,19 @@ class Logfinder(object):
             remote_file = os.path.split(local_file)[1]
             try:
                 if protocol == 'sftp':
-                    self.__sftp(host_, port_, usr_, pas_, path_, local_file, remote_file)
+                    self.sftp(host_, port_, usr_, pas_, path_, local_file, remote_file)
                 elif protocol == 'ftp':
-                    self.__ftp(host_, port_, usr_, pas_, path_, local_file, remote_file)
+                    self.ftp(host_, port_, usr_, pas_, path_, local_file, remote_file)
+
+                cfg.set('Upload', 'last_work', v_)
+                with open('./config.ini', 'w', encoding='UTF-8') as cfg_fp:
+                    cfg.write(cfg_fp)
                 break
             except Exception as err:
                 log.warning('upload error %s%s: %s', protocol, host_, str(err))
                 continue
 
-    def __sftp(self, host_, port_, usr_, pas_, path_, local_file, remote_file):
+    def sftp(self, host_, port_, usr_, pas_, path_, local_file, remote_file):
         import paramiko
         paramiko.util.log_to_file(os.path.join(self.__LogPath, '.log'))
         t = paramiko.Transport((host_, int(port_)))
@@ -280,7 +283,7 @@ class Logfinder(object):
         sftp.put(local_file, remote_file)
         t.close()
 
-    def __ftp(self, host_, port_, usr_, pas_, path_, local_file, remote_file):
+    def ftp(self, host_, port_, usr_, pas_, path_, local_file, remote_file):
         import ftplib
         f = ftplib.FTP(host_)
         f.login(usr_, pas_)
