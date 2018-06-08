@@ -18,6 +18,7 @@ from shutil import rmtree
 from chardet import detect
 
 from config import cfg, log
+from distribute import Distribute
 
 
 class Logfinder(object):
@@ -294,4 +295,6 @@ class Logfinder(object):
 
 
 if __name__ == '__main__':
+    if system() != 'Windows':
+        Distribute(sys.argv[1:])
     Logfinder()
