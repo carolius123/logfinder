@@ -38,18 +38,19 @@ class Distribute(object):
 
         self.run()
 
-    def __loadCredentials(self, credentials):
-        if not credentials:
-            credentials = cfg.get('Distribute', 'Credentials')
-            if not credentials:
-                return set()
-            credentials = base64.decodebytes(bytes(credentials, encoding='utf8')).decode().split(';')
-        self.credentials = [[v.strip() for v in c.split('/')] for c in credentials]
-        credentials = ''
-        for credential in self.credentials:
-            credentials += '/'.join(credential) + ';'
-        credentials = base64.encodebytes(bytes(credentials[:-1], encoding='utf8')).decode()
-        cfg.set('Distribute', 'Credentials', credentials)
+    @staticmethod
+    def __loadCredentials(argv):
+        if argv:
+            credentials = argv
+            encoded_credentials = base64.encodebytes(bytes(';'.join(credentials), encoding='utf8')).decode()
+            cfg.set('Distribute', 'Credentials', encoded_credentials)
+        else:
+            encoded_credentials = cfg.get('Distribute', 'Credentials')
+            if not encoded_credentials:
+                return []
+            credentials = base64.decodebytes(bytes(encoded_credentials, encoding='utf8')).decode().split(';')
+        credentials = [[v.strip() for v in c.split('/')] for c in credentials]
+        return credentials
 
     # 从配置文件中装载需排除的子网信息
     @staticmethod
@@ -75,8 +76,8 @@ class Distribute(object):
             self.objective_hosts -= self.excluded_hosts  # 去掉已分发过的主机
             for host in self.objective_hosts:
                 name = '@'.join([usr, host])
-                # self.sshConnect(host, usr, passwd)
                 threading.Thread(target=self.sshConnect, args=(host, usr, passwd), name=name, daemon=True).start()
+                # self.sshConnect(host, usr, passwd)
             time.sleep(self.sleep_seconds)
         self.__saveExcludedSubnets(chain_length=0)
         return
@@ -153,44 +154,30 @@ class Distribute(object):
         with open('./config.ini', 'w', encoding='UTF-8') as cfg_fp:
             cfg.write(cfg_fp)
 
-    def sshConnect(self, host, usr='', passwd='', port=22):
+    def sshConnect(self, host, usr, passwd, port=22):
         if not usr:
-            usr = os.environ['USER']
-        rsa_id_file = os.path.join(os.environ['HOME'], '.ssh/id_rsa')
-        transport = paramiko.Transport((host, port))
+            usr = None
         try:
-            if passwd:
-                transport.connect(username=usr, password=passwd)
-            elif os.path.isfile(rsa_id_file):
-                private_key = paramiko.RSAKey.from_private_key_file(rsa_id_file)
-                transport.connect(username=usr, pkey=private_key)
-            else:
-                raise paramiko.ssh_exception.SSHException('no password given and no .ssh/id_rsa file')
             ssh = paramiko.SSHClient()  # 创建SSH对象
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # 允许连接不在know_hosts文件中的主机
-            ssh._transport = transport
-            if self.distribute(transport, ssh):
-                log.info('logfinder launched on %s@%s ****%s', usr, host, passwd[-2:])
+            ssh.connect(hostname=host, port=port, username=usr, password=passwd)
             self.excluded_hosts.add(host)
+            stdin, stdout, stderr = ssh.exec_command('cd .logfinder; ls .version*')
+            current_version_file = bytes.decode(stdout.read()).strip()
+            if current_version_file >= self.version:
+                return
+            ssh.exec_command('mkdir .logfinder; cd .logfinder; rm .version*; touch %s' % self.version)  # 执行命令
+            for file in ['logfinder', 'config.ini']:
+                stdin, _, _ = ssh.exec_command('cat > .logfinder/' + file)
+                stdin.write(open('./' + file, 'rb').read())
+            # ulimit -m 102400 - t 3600； 命令可以限制本shell使用的100M内存、1小时cpu时间
+            ssh.exec_command('cd .logfinder;chmod +x logfinder; nice ./logfinder & ')
+            log.info('logfinder launched on %s@%s ****%s', usr, host, passwd[-2:])
             ssh.close()
         except Exception as err:
             log.info('ssh to %s@%s failed:%s', usr, host, str(err))
-
-        transport.close()
         return
 
-    def distribute(self, transport, ssh):
-        stdin, stdout, stderr = ssh.exec_command('cd .logfinder; ls .version*')
-        current_version_file = bytes.decode(stdout.read()).strip()
-        if current_version_file >= self.version:
-            return False
 
-        ssh.exec_command('mkdir .logfinder')  # 执行命令
-        ssh.exec_command('cd .logfinder; rm .version*; touch %s' % self.version)
-        sftp = paramiko.SFTPClient.from_transport(transport)
-        sftp.put('./config.ini', '.logfinder/config.ini')
-        sftp.put('./logfinder', '.logfinder/logfinder')
-        sftp.close()
-        ssh.exec_command('cd .logfinder;chmod +x logfinder')
-        ssh.exec_command('cd .logfinder;./logfinder & ')  # 执行命令
-        return True
+if __name__ == '__main__':
+    x = 1

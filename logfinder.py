@@ -284,7 +284,8 @@ class Logfinder(object):
         sftp.put(local_file, remote_file)
         t.close()
 
-    def ftp(self, host_, port_, usr_, pas_, path_, local_file, remote_file):
+    @staticmethod
+    def ftp(host_, port_, usr_, pas_, path_, local_file, remote_file):
         import ftplib
         f = ftplib.FTP(host_)
         f.login(usr_, pas_)
