@@ -2,6 +2,9 @@
   <dictionary name="admin">
     <words>
       <w>logfinder</w>
+      <w>mkdir</w>
+      <w>stdin</w>
+      <w>subnets</w>
     </words>
   </dictionary>
 </component>
