@@ -14,9 +14,9 @@
         # pip3 install pyinstaller
         # pip3 install chardet
 
-1. 打包
+2. 打包
    本软件需要部署到很多被管服务器上，为了降低对被管服务器软件配置的要求，本软件的py程序采样pyinstaller打包为可执行程序。打包命令为：
    pyinstaller -F logfinder.py
    pyinstaller -F distribute.py
 
-2. 分发
+3. 分发

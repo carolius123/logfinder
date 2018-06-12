@@ -196,7 +196,7 @@ class Logfinder(object):
             for file_name in os.listdir(path_from):
                 # 判断是否是潜在日志文件
                 file_from = os.path.join(path_from, file_name)
-                if not self.__isLogFile(file_from, fc, newer_than=31536000):  # 该文件不是候选日志，无需采
+                if not self.__isLogFile(file_from, fc, newer_than=cfg.getint('Sample', 'LastUpdateDays') * 24 * 3600):
                     continue
                 # 生成目标文件名
                 if self.__OutputFormat == 'Separate':
@@ -304,8 +304,9 @@ if __name__ == '__main__':
                 program_name = os.path.splitext(os.path.realpath(__file__))[0]
                 cmd = 'echo "%s nice %s &" > cron.cfg; crontab cron.cfg' % (schedule, program_name)
                 os.popen(cmd)
-            import resource  # 限制自身CPU和内存用量，防止干扰被管系统
+            # chkconfig --level 35 crond on
 
+            import resource  # 限制自身CPU和内存用量，防止干扰被管系统
             max_cpu_seconds = cfg.getint('Setup', 'maxCPUSeconds')
             if max_cpu_seconds:
                 resource.setrlimit(resource.RLIMIT_CPU, (max_cpu_seconds, max_cpu_seconds))

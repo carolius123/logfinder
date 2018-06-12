@@ -170,9 +170,6 @@ class Distribute(object):
             for file in ['logfinder', 'config.ini']:
                 stdin, _, _ = ssh.exec_command('cat > .logfinder/' + file)
                 stdin.write(open('./' + file, 'rb').read())
-            # ulimit -m 102400 - t 3600； 命令可以限制本shell使用的100M内存、1小时cpu时间
-            # chkconfig --level 35 crond on
-            # crontab
             ssh.exec_command('cd .logfinder;chmod +x logfinder; nice ./logfinder & ')
             log.info('logfinder launched on %s@%s ****%s', usr, host, passwd[-2:])
             ssh.close()
