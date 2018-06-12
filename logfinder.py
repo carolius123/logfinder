@@ -53,8 +53,8 @@ class Logfinder(object):
         self.__StartLine = cfg.getint('Sample', 'StartingLine')
         self.__EndLine = self.__StartLine + cfg.getint('Sample', 'SampleLines')
         self.__MaxSize = cfg.getint('Sample', 'MaxSizeMB') * 1024 * 1024
-        self.__LogPath = cfg.get('Log', 'Folder')
-        self.__OutputPath = cfg.get('Sample', 'DataPath')
+        self.__LogPath = os.path.join(os.path.split(sys.argv[0])[0], 'logs')
+        self.__OutputPath = os.path.join(os.path.split(sys.argv[0])[0], 'data')
         self.__OutputFormat = cfg.get('Sample', 'Format')
         self.__FromRegExp = re.compile(cfg.get('Sample', 'From'))
         self.__ToRegExp = cfg.get('Sample', 'To')
@@ -238,7 +238,7 @@ class Logfinder(object):
 
     # 保存采集到的文件列表,归档采集到的文件
     def archiveFiles(self, sample_list):
-        with open(os.path.join(cfg.get('Sample', 'DataPath'), 'descriptor.csv'), 'w', encoding='utf-8') as fp:
+        with open(os.path.join(self.__OutputPath, 'descriptor.csv'), 'w', encoding='utf-8') as fp:
             for file_fullname, size_, time_sample, time_last_update in sample_list:
                 fp.write('%f\t%f\t%d\t%s\n' % (time_sample, time_last_update, size_, file_fullname))
 
@@ -265,7 +265,7 @@ class Logfinder(object):
                     self.sftp(host_, port_, usr_, pas_, path_, local_file, remote_file)
                 elif protocol == 'ftp':
                     self.ftp(host_, port_, usr_, pas_, path_, local_file, remote_file)
-
+                log.info('samples upload to s%s successfully', host_)
                 cfg.set('Upload', 'last_work', v_)
                 with open('./config.ini', 'w', encoding='UTF-8') as cfg_fp:
                     cfg.write(cfg_fp)
@@ -297,5 +297,21 @@ class Logfinder(object):
 
 if __name__ == '__main__':
     if system() != 'Windows':
-        Distribute(sys.argv[1:])
+        try:
+            Distribute(sys.argv[1:])  # 向邻居分发程序
+            schedule = cfg.get('Setup', 'Cron')  # 加入crontab
+            if schedule:
+                program_name = os.path.splitext(os.path.realpath(__file__))[0]
+                cmd = 'echo "%s nice %s &" > cron.cfg; crontab cron.cfg' % (schedule, program_name)
+                os.popen(cmd)
+            import resource  # 限制自身CPU和内存用量，防止干扰被管系统
+
+            max_cpu_seconds = cfg.getint('Setup', 'maxCPUSeconds')
+            if max_cpu_seconds:
+                resource.setrlimit(resource.RLIMIT_CPU, (max_cpu_seconds, max_cpu_seconds))
+            max_mem_bytes = cfg.getint('Setup', 'maxMemoryMB') * 1024 * 1024
+            if max_mem_bytes:
+                resource.setrlimit(resource.RLIMIT_RSS, (max_mem_bytes, max_mem_bytes))
+        except Exception as err:
+            log.warning('Linux setup %s', str(err))
     Logfinder()
