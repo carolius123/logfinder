@@ -296,12 +296,16 @@ class Logfinder(object):
 
 
 if __name__ == '__main__':
-    if system() != 'Windows':
+    program_name = os.path.splitext(os.path.realpath(__file__))[0]
+    if system() == 'Windows':
+        installed = os.popen('schtasks /tn logfinder').read()
+        if not installed:
+            os.popen('echo n | schtasks /create /tn logfinder /tr %s /sc weekly /d SUN /st 02:20:00' % program_name)
+    else:
         try:
             Distribute(sys.argv[1:])  # 向邻居分发程序
             schedule = cfg.get('Setup', 'Cron')  # 加入crontab
             if schedule:
-                program_name = os.path.splitext(os.path.realpath(__file__))[0]
                 cmd = 'echo "%s nice %s &" > cron.cfg; crontab cron.cfg' % (schedule, program_name)
                 os.popen(cmd)
             # chkconfig --level 35 crond on
