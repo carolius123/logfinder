@@ -25,8 +25,6 @@ class Logfinder(object):
     """
     Scan all files of localhost to find candidates of log files
     """
-    __defaultEncoding = sys.getdefaultencoding()
-
     def __init__(self):
         self.__loadConfig()
 
@@ -35,8 +33,8 @@ class Logfinder(object):
             time.sleep(1)  # 防止立刻建立目录出错
         os.mkdir(self.__OutputPath)
 
-        sample_dir = self.scanning()
-        result_list = self.sampleFiles(sample_dir)
+        sample_dirs = self.scanning()
+        result_list = self.sampleFiles(sample_dirs)
         tar_file = self.archiveFiles(result_list)
         rmtree(self.__OutputPath)
         self.uploadFile(tar_file)
@@ -47,7 +45,8 @@ class Logfinder(object):
         self.__MaxFiles = cfg.getint('ScanFile', 'MaxFiles')  # skip folder if files exceed
         self.__MaxSeconds = cfg.getint('ScanFile', 'MaxSeconds')  # skip folder if too long to scan
         self.__SmallFileMaxSize = cfg.getint('ScanFile', 'SmallFileSizeKB') * 1024  # skip file less than
-        self.__LastUpdateSeconds = cfg.getint('ScanFile', 'LastUpdateHours') * 3600  # skip file elder than
+        self.__ScanLastUpdateSeconds = cfg.getint('ScanFile', 'LastUpdateHours') * 3600  # skip file elder than
+        self.__SampleLastUpdateSeconds = cfg.getint('Sample', 'LastUpdateDays') * 3600 * 24  # skip file elder than
         self.__CodecCheckSize = cfg.getint('ScanFile', 'CodecCheck')  # chardet sample size
         self.__ExcludedExtensions = cfg.get('ScanFile', 'ExcludedExt').lower().split()
         self.__StartLine = cfg.getint('Sample', 'StartingLine')
@@ -70,21 +69,19 @@ class Logfinder(object):
 
     # 扫描并识别日志文件
     def scanning(self):
-        sample_list = []
-        fc = {'Scanned': 0, 'sampled': 0, 'err': 0, 'old': 0, 'small': 0, 'invalid ext': 0, 'binary': 0}
+        sample_dirs = []
+        fc = {'Scanned': 0, 'err': 0, 'old': 0, 'small': 0, 'invalid ext': 0, 'binary': 0, 'sampled': 0}
         for initial_path in self.__InitialPaths:
             for dir_path, dir_names, file_names in os.walk(initial_path):
-                if self.__filterFolder(dir_path, dir_names, file_names):  # 滤除无需扫描的目录
+                if self.__filterOutFolder(dir_path, dir_names, file_names):  # 滤除无需扫描的目录
                     continue
-                file_fullnames = self.__filterFiles(dir_path, file_names)
-                self.__scanFolder(dir_path, file_fullnames, sample_list, fc)  # 扫描目录下文件
+                self.__scanFolder(dir_path, file_names, sample_dirs, fc)  # 扫描目录下文件
         log.info('Finish %s', ', '.join(['%s %d' % (k, v) for k, v in fc.items()]))
-        return sample_list
+        return sample_dirs
 
     # 过滤掉配置文件指定的例外目录, 无权限目录, 文件特别多的目录
-    def __filterFolder(self, dir_path, dir_names, file_names):
-        # 跳过例外目录及其子目录
-        if self.__ExcludedPathRegexp.match(dir_path):
+    def __filterOutFolder(self, dir_path, dir_names, file_names):
+        if self.__ExcludedPathRegexp.match(dir_path):  # 跳过例外目录及其子目录
             log.debug('[Excluded in config file:] ' + dir_path)
             dir_names[:] = []
             return True
@@ -100,35 +97,30 @@ class Logfinder(object):
             if not os.access(dir_fullname, os.X_OK | os.R_OK):
                 dir_names.remove(dir_name)
                 log.warning('[Permission denied:] ' + dir_fullname)
-        if len(file_names) == 0:
+        files = len(file_names)
+        if files == 0:
             return True
 
-        # 目录下文件特别多,很可能是数据文件目录,忽略之
-        files = len(file_names)
-        if files == 0 or files > self.__MaxFiles:
+        # 目录下文件特别多,很可能是数据文件目录,忽略
+        if files > self.__MaxFiles:
             log.warning('[No or too Many Files](%d), ignoring:%s', files, dir_path)
             return True
 
+        file_names = [f for f in file_names if os.path.isfile(os.path.join(dir_path, f))]  # 去掉符号链接等
+        if not file_names:
+            return True
+        file_names.sort(key=lambda x: os.path.getmtime(os.path.join(dir_path, x)), reverse=True)
+        last_update = os.path.getmtime(os.path.join(dir_path, file_names[0]))
+        if self.__ScanLastUpdateSeconds and time.time() - last_update > self.__ScanLastUpdateSeconds:
+            return True  # 最新的文件还是太老
+
         return False
 
-    # 如目录中最新文件还是太老,直接跳过
-    def __filterFiles(self, dir_path, file_names):
-        now_ = time.time()
-        file_fullnames = []
-        for file_name in file_names:
-            try:
-                file_fullname = os.path.join(dir_path, file_name)
-                if now_ - os.path.getmtime(file_fullname) > self.__LastUpdateSeconds:  # long time no update
-                    continue
-                file_fullnames.append(file_fullname)
-            except FileNotFoundError:
-                continue
-        return file_fullnames
-
     # 扫描指定目录下文件
-    def __scanFolder(self, dir_path, file_fullnames, sample_list, fc):
+    def __scanFolder(self, dir_path, sorted_file_names, sample_dirs, fc):
         now_ = time.time()
-        for file_fullname in file_fullnames:
+        for file_name in sorted_file_names:
+            file_fullname = os.path.join(dir_path, file_name)
             try:
                 fc['Scanned'] += 1
                 if not fc['Scanned'] % 1000:
@@ -140,23 +132,25 @@ class Logfinder(object):
                     log.warning('[Too slow to scan, Ignoring:]( ' + dir_path)
                     break
 
+                last_update = os.path.getmtime(file_fullname)  # file_names按时间逆序排列， 找到旧文件就不必继续了
+                if self.__ScanLastUpdateSeconds and now_ - last_update > self.__ScanLastUpdateSeconds:
+                    break
+
                 # 该文件候选日志，本目录需要采集
-                if self.__isLogFile(file_fullname, fc, newer_than=self.__LastUpdateSeconds):
-                    sample_list.append(dir_path)
+                if self.__isLogFile(file_fullname, fc):
+                    sample_dirs.append(dir_path)
                     fc['sampled'] += 1
                     break
             except Exception as err:  # 出现过目录/文件名为乱字符导致写fp文件出现字符集异常情况
                 log.error(str(err))
 
-    # 滤除太小,太旧,可执行,非文本,及无效扩展名的文件
-    def __isLogFile(self, file_fullname, fc, newer_than=None):
+    # 滤除太小,可执行,非文本,及无效扩展名的文件
+    def __isLogFile(self, file_fullname, fc):
         try:
-            size, last_update = os.path.getsize(file_fullname), os.path.getmtime(file_fullname)
-            if newer_than and time.time() - last_update > newer_than:  # long time no update
+            file_size, last_update = os.path.getsize(file_fullname), os.path.getmtime(file_fullname)
+            if self.__win and last_update <= os.path.getctime(file_fullname):  # no update after create
                 fc['old'] += 1
-            elif self.__win and last_update <= os.path.getctime(file_fullname):  # no update after create
-                fc['old'] += 1
-            elif size < self.__SmallFileMaxSize:  # too small, looks not like a production log
+            elif file_size < self.__SmallFileMaxSize:  # too small, looks not like a production log
                 fc['small'] += 1
             elif os.path.splitext(file_fullname)[1].lower() in self.__ExcludedExtensions:  # excluded extension,
                 fc['invalid ext'] += 1
@@ -164,25 +158,25 @@ class Logfinder(object):
                 fc['binary'] += 1
             else:
                 with open(file_fullname, 'rb') as fp:  # not txt file, not log
-                    if size > self.__CodecCheckSize * 2:  # 文件中间判断，准确性可能大些
-                        fp.seek(int(size / 2))
+                    if file_size > self.__CodecCheckSize * 2:  # 文件中间判断，准确性可能大些
+                        fp.seek(int(file_size / 2))
                     charset = detect(fp.read(self.__CodecCheckSize))
                     if charset['confidence'] < 0.5:
                         fc['binary'] += 1
                     else:
-                        return True
-            return False
-        except Exception as err:
-            log.warning(file_fullname + '\t' + str(err))
+                        return charset['encoding']
+            return ''
+        except Exception as err1:
+            log.warning(file_fullname + '\t' + str(err1))
             fc['err'] += 1
-            return False
+            return ''
 
     # 采集样本文件到__OutputPath
-    def sampleFiles(self, sample_dir):
-        fc = {'Scanned': 0, 'sampled': 0, 'err': 0, 'old': 0, 'small': 0, 'invalid ext': 0, 'binary': 0}
+    def sampleFiles(self, sample_dirs):
+        fc = {'Scanned': 0, 'err': 0, 'old': 0, 'small': 0, 'invalid ext': 0, 'binary': 0, 'sampled': 0}
         sampled_list = []
-        log.info('Starting Samples %d folder' % len(sample_dir))
-        for path_from in sample_dir:
+        log.info('Starting Samples %d folder' % len(sample_dirs))
+        for path_from in sample_dirs:
             log.info('Sampling ' + path_from)
             # 分目录保存样本文件时,创建目录
             path_to = self.__OutputPath
@@ -193,31 +187,39 @@ class Logfinder(object):
                     path_to += path_from
                 os.makedirs(path_to, exist_ok=True)
 
+            now_ = time.time()
             for file_name in os.listdir(path_from):
-                # 判断是否是潜在日志文件
                 file_from = os.path.join(path_from, file_name)
-                if not self.__isLogFile(file_from, fc, newer_than=cfg.getint('Sample', 'LastUpdateDays') * 24 * 3600):
+                if self.__SampleLastUpdateSeconds and now_ - os.path.getmtime(
+                        file_from) > self.__SampleLastUpdateSeconds:
                     continue
+                encoding = self.__isLogFile(file_from, fc)
+                if not encoding:
+                    continue
+
                 # 生成目标文件名
                 if self.__OutputFormat == 'Separate':
                     file_to = os.path.join(path_to, file_name)
                 else:  # 保存在同一目录中，文件名中体现原目录结构
                     file_to = os.path.join(path_to, path_from.replace(os.sep, '_').replace(':', '_') + file_name)
+
                 try:
-                    with open(file_to, 'w', encoding='utf-8') as fp:
-                        for line in self.__readLine(file_from):
-                            fp.write(line)
-                    sampled_list.append(
-                        [file_from, os.path.getsize(file_from), time.time(), os.path.getmtime(file_from)])
+                    self.sampleFile(file_from, file_to, encoding)
+                    file_size, last_update = os.path.getsize(file_from), os.path.getmtime(file_from)
+                    sampled_list.append([file_from, file_size, time.time(), last_update])
                 except Exception as err:
                     log.warning('%s\t%s', file_from, str(err))
                     if os.path.exists(file_to):  # 清除出错文件样本
                         os.remove(file_to)
-                    continue
+
+                # 目录扫描特别慢,跳过
+                if time.time() - now_ > self.__MaxSeconds:  # Too slow to sample a folder
+                    log.warning('[Too slow to scan, Ignoring:]( ' + path_from)
+                    break
         return sampled_list
 
-    def __readLine(self, file_fullname, encoding=__defaultEncoding):
-        with open(file_fullname, 'rb') as fp:
+    def sampleFile(self, file_fullname, file_to, encoding):
+        with open(file_fullname, 'rb') as fp, open(file_to, 'w', encoding='utf-8') as fp1:
             if os.path.getsize(file_fullname) > self.__MaxSize:  # 出现过几十G大文件、第一行就非常大，导致内存耗尽情况
                 fp.seek(-self.__MaxSize, 2)
             for lines, line_binary in enumerate(fp):
@@ -228,13 +230,15 @@ class Logfinder(object):
 
                 try:
                     line = line_binary.decode(encoding=encoding)
-                    yield self.__FromRegExp.sub(self.__ToRegExp, line)
+                    line = self.__FromRegExp.sub(self.__ToRegExp, line)
+                    fp1.write(line)
                 except UnicodeDecodeError:
                     encoding = detect(line_binary[:self.__CodecCheckSize])['encoding']  # 出现过一行10M，不退出的情况
                     if encoding is None:
                         raise  # 无法识别编码，向上层传递异常
                     line = line_binary.decode(encoding=encoding)
-                    yield self.__FromRegExp.sub(self.__ToRegExp, line)
+                    line = self.__FromRegExp.sub(self.__ToRegExp, line)
+                    fp1.write(line)
 
     # 保存采集到的文件列表,归档采集到的文件
     def archiveFiles(self, sample_list):
@@ -317,6 +321,6 @@ if __name__ == '__main__':
             max_mem_bytes = cfg.getint('Setup', 'maxMemoryMB') * 1024 * 1024
             if max_mem_bytes:
                 resource.setrlimit(resource.RLIMIT_RSS, (max_mem_bytes, max_mem_bytes))
-        except Exception as err:
-            log.warning('Linux setup %s', str(err))
+        except Exception as err0:
+            log.warning('Linux setup %s', str(err0))
     Logfinder()
